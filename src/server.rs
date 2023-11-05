@@ -61,7 +61,7 @@ impl TcpClient {
     }
 }
 
-fn create_ssl_server(ssl_cert: String, ssl_key: String) -> Result<openssl::ssl::SslAcceptor, std::io::Error> {
+fn create_ssl_server(ssl_cert: &str, ssl_key: &str) -> Result<openssl::ssl::SslAcceptor, std::io::Error> {
     match openssl::ssl::SslAcceptor::mozilla_intermediate(openssl::ssl::SslMethod::tls_server()) {
         Ok(mut ssl_accepter) => {
             if let Err(err) = ssl_accepter.set_private_key_file(ssl_key, openssl::ssl::SslFiletype::PEM) {
@@ -159,7 +159,7 @@ pub async fn start() {
     loop {
         let listener_ssl: Option<openssl::ssl::SslAcceptor> = match general_config.https {
             true => {
-                match create_ssl_server(general_config.ssl_certificate.clone(), general_config.ssl_certificate_key.clone()) {
+                match create_ssl_server(&general_config.ssl_certificate, &general_config.ssl_certificate_key) {
                     Ok(ssl_accepter) => {
                         Some(ssl_accepter)
                     },
