@@ -1,0 +1,10 @@
+[package]
+name = "WAF"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+once_cell = "1.18.0"
+serde = { version = "1.0.190", features = ["derive"] }
+serde_yaml = "0.9.27"
+tokio = { version = "1.33.0", features = ["full"] }
