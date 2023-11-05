@@ -1,5 +1,7 @@
 destination: 192.168.122.23
-destination_port: 80
+destination_port: 443
+resolve_name: 192.168.122.23
 maximum_number_of_conn: 100
 conn_count: 0
 requests_per_second: 10
+https: true

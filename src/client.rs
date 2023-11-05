@@ -1,15 +1,100 @@
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
 use crate::edge_server;
+use crate::server;
 
-async fn procedure(mut conn: tokio::net::TcpStream, connaddr: String, edgeconnaddr: String) {
-    let mut edge_conn = match tokio::net::TcpStream::connect(&edgeconnaddr).await {
-        Ok(conn) => {
-            conn
+async fn connect_to_https_edge_server(address: String, resolved_name: String) -> Result<server::TcpClient, std::io::Error> {
+    match openssl::ssl::SslConnector::builder(openssl::ssl::SslMethod::tls()) {
+        Ok(mut ssl_builder) => {
+            ssl_builder.set_verify(openssl::ssl::SslVerifyMode::NONE); // accept self-signed certificates
+
+            let ssl_connector = ssl_builder.build();
+
+            match ssl_connector.configure() {
+                Ok(ssl_config) => {
+                    match ssl_config.into_ssl(&resolved_name) {
+                        Ok(ssl) => {
+                            match tokio::net::TcpStream::connect(&address).await {
+                                Ok(conn) => {
+                                    match tokio_openssl::SslStream::new(ssl, conn) {
+                                        Ok(mut conn_ssl) => {
+                                            match tokio_openssl::SslStream::connect(std::pin::Pin::new(&mut conn_ssl)).await {
+                                                Ok(_) => {
+                                                    return Ok(server::TcpClient::Https(conn_ssl));
+                                                },
+                                                Err(err) => {
+                                                    eprintln!("SSL error from {}, error: {}", address, err.to_string());
+                                                    return Err(std::io::Error::new(std::io::ErrorKind::Other, err.to_string()));
+                                                }
+                                            };
+                                        },
+                                        Err(err) => {
+                                            eprintln!("SSL error from {}, error: {}", address, err.to_string());
+                                            return Err(std::io::Error::new(std::io::ErrorKind::Other, err.to_string()));
+                                        }
+                                    };
+                                },
+                                Err(err) => {
+                                    return Err(std::io::Error::new(std::io::ErrorKind::Other, err.to_string()));
+                                }
+                            };
+                        },
+                        Err(err) => {
+                            eprintln!("SSL error from {}, error: {}", address, err.to_string());
+                            return Err(std::io::Error::new(std::io::ErrorKind::Other, err.to_string()));
+                        }
+                    };
+                },
+                Err(err) => {
+                    eprintln!("SSL error from {}, error: {}", address, err.to_string());
+                    return Err(std::io::Error::new(std::io::ErrorKind::Other, err.to_string()));
+                }
+            };
+
         },
         Err(err) => {
-            eprintln!("failed to connect to {}, error: {}", edgeconnaddr, err.to_string());
-            return;
+            eprintln!("SSL error from {}, error: {}", address, err.to_string());
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, err.to_string()));
+        }
+    };
+}
+
+async fn connect_to_http_edge_server(address: String) -> Result<server::TcpClient, std::io::Error> {
+    match tokio::net::TcpStream::connect(&address).await {
+        Ok(conn) => {
+            return Ok(server::TcpClient::Http(conn));
+        },
+        Err(err) => {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, err.to_string()));
+        }
+    };
+}
+
+async fn procedure(mut conn: server::TcpClient, connaddr: String, edgeconnaddr: String, edgeconn_domain: String, edge_https: bool) {
+    let mut edge_conn = match edge_https {
+        true => {
+            let result = match connect_to_https_edge_server(edgeconnaddr.clone(), edgeconn_domain).await {
+                Ok(edge_conn) => {
+                    edge_conn
+                },
+                Err(err) => {
+                    eprintln!("failed to connect to edge server {}, error: {}", edgeconnaddr, err.to_string());
+                    return;
+                }
+            };
+
+            result
+        },
+        false => {
+            let result = match connect_to_http_edge_server(edgeconnaddr.clone()).await {
+                Ok(edge_conn) => {
+                    edge_conn
+                },
+                Err(err) => {
+                    eprintln!("failed to connect to edge server {}, error: {}", edgeconnaddr, err.to_string());
+                    return;
+                }
+            };
+
+            result
         }
     };
 
@@ -64,7 +149,7 @@ async fn procedure(mut conn: tokio::net::TcpStream, connaddr: String, edgeconnad
     }
 }
 
-pub async fn handler(conn: tokio::net::TcpStream, connaddr: std::net::SocketAddr) {
+pub async fn handler(conn: server::TcpClient, connaddr: std::net::SocketAddr) {
     let _ = conn;
     let connaddr_friendly = connaddr.to_string();
 
@@ -72,11 +157,8 @@ pub async fn handler(conn: tokio::net::TcpStream, connaddr: std::net::SocketAddr
 
     match edge_server::find_edge_server() {
         Ok(edge_info) => {
-            let edge_server_ip = edge_info.0;
-            let edge_server_port = edge_info.1;
-
-            procedure(conn, connaddr_friendly.clone(), format!("{}:{}", &edge_server_ip, edge_server_port)).await;
-            edge_server::decrement_conn_count(edge_server_ip);
+            procedure(conn, connaddr_friendly.clone(), format!("{}:{}", &edge_info.destination, edge_info.destination_port), edge_info.resolve_name, edge_info.https).await;
+            edge_server::decrement_conn_count(edge_info.destination);
             println!("the connection with {}, closed", connaddr_friendly.clone());
         },
         Err(err) => {

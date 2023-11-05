@@ -44,7 +44,7 @@ pub fn decrement_conn_count(edge_server_ip: String) {
     }
 }
 
-pub fn find_edge_server() -> Result<(String, u16), std::io::Error> {
+pub fn find_edge_server() -> Result<configdb::ConfigEdge, std::io::Error> {
     let mut edge_servers_list: Vec<(String, configdb::ConfigEdge)> = Vec::new();
 
     match EDGE_SERVER_LOCK.lock() {
@@ -101,7 +101,7 @@ pub fn find_edge_server() -> Result<(String, u16), std::io::Error> {
         
                     match std::fs::write(&filename, serde_yaml::to_string(&config_edge).unwrap()) {
                         Ok(_) => {
-                            return Ok((config_edge.destination, config_edge.destination_port));
+                            return Ok(config_edge);
                         },
                         Err(err) => {
                             eprintln!("failed to update the file {}, error: {}", filename, err.to_string());
