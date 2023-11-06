@@ -4,3 +4,4 @@ maximum_connections: 1024
 https: true
 ssl_certificate: "appdata/wafssl.crt"
 ssl_certificate_key: "appdata/wafssl.key"
+ingress: Deny

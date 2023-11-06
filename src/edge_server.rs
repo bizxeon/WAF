@@ -11,7 +11,7 @@ pub fn decrement_conn_count(edge_server_ip: String) {
 
             let mut edge_server = match std::fs::read_to_string(&edge_filepath) {
                 Ok(edge_file_content) => {
-                    match serde_yaml::from_str::<configdb::ConfigEdge>(&edge_file_content) {
+                    match serde_yaml::from_str::<configdb::Edge>(&edge_file_content) {
                         Ok(edge_server) => {
                             edge_server
                         },
@@ -44,8 +44,8 @@ pub fn decrement_conn_count(edge_server_ip: String) {
     }
 }
 
-pub fn find_edge_server() -> Result<configdb::ConfigEdge, std::io::Error> {
-    let mut edge_servers_list: Vec<(String, configdb::ConfigEdge)> = Vec::new();
+pub fn find_edge_server() -> Result<configdb::Edge, std::io::Error> {
+    let mut edge_servers_list: Vec<(String, configdb::Edge)> = Vec::new();
 
     match EDGE_SERVER_LOCK.lock() {
         Ok(_) => {
@@ -60,7 +60,7 @@ pub fn find_edge_server() -> Result<configdb::ConfigEdge, std::io::Error> {
         
                                         match std::fs::read_to_string(&edge_filepath) {
                                             Ok(edge_file_content) => {
-                                                match serde_yaml::from_str::<configdb::ConfigEdge>(&edge_file_content) {
+                                                match serde_yaml::from_str::<configdb::Edge>(&edge_file_content) {
                                                     Ok(edge_server) => {
                                                         edge_servers_list.push((edge_filepath, edge_server));
                                                     },
@@ -136,7 +136,7 @@ pub fn initialize() -> Result<(), std::io::Error> {
 
                                         match std::fs::read_to_string(&edge_filepath) {
                                             Ok(edge_file_content) => {
-                                                match serde_yaml::from_str::<configdb::ConfigEdge>(&edge_file_content) {
+                                                match serde_yaml::from_str::<configdb::Edge>(&edge_file_content) {
                                                     Ok(mut edge_server) => {
                                                         edge_server.conn_count = 0;
 

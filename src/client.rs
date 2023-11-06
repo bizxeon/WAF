@@ -1,6 +1,7 @@
 use crate::configdb;
 use crate::edge_server;
 use crate::server;
+use crate::ip_rule;
 
 async fn connect_to_https_edge_server<Address: AsRef<str> + tokio::net::ToSocketAddrs + std::fmt::Display>(address: Address, resolved_name: &str) -> Result<server::TcpClient, std::io::Error> {
     match openssl::ssl::SslConnector::builder(openssl::ssl::SslMethod::tls()) {
@@ -69,7 +70,7 @@ async fn connect_to_http_edge_server<Address: AsRef<str> + tokio::net::ToSocketA
     };
 }
 
-async fn procedure(mut conn: server::TcpClient, connaddr: String, edge_info: &configdb::ConfigEdge) {
+async fn procedure(mut conn: server::TcpClient, connaddr: String, edge_info: &configdb::Edge, ip_rule: &Option<configdb::IpRule>) {
     let edgeaddr = format!("{}:{}", edge_info.destination, edge_info.destination_port);
 
     let mut edge_conn = match edge_info.https {
@@ -152,15 +153,30 @@ async fn procedure(mut conn: server::TcpClient, connaddr: String, edge_info: &co
     }
 }
 
-pub async fn handler(conn: server::TcpClient, connaddr: std::net::SocketAddr) {
-    let _ = conn;
+pub async fn handler(conn: server::TcpClient, connaddr: std::net::SocketAddr, general_config: configdb::General) {
     let connaddr_friendly = connaddr.to_string();
+    let ip_rule = ip_rule::get_ip_rule(connaddr.ip().to_string());
+
+    if let Some(ip_rule) = ip_rule.clone() {
+        if matches!(ip_rule.ingress, configdb::RuleGress::Deny) {
+            println!("dropping connection with {connaddr_friendly}, blocked by rule");
+            return;
+        }
+        
+        if matches!(general_config.ingress, configdb::GenericRuleGress::Deny) && !matches!(ip_rule.ingress, configdb::RuleGress::Allow) {
+            println!("dropping connection with {connaddr_friendly}, blocked by rule");
+            return;
+        }
+    } else if matches!(general_config.ingress, configdb::GenericRuleGress::Deny) {
+        println!("dropping connection with {connaddr_friendly}, blocked by rule");
+        return;
+    }
 
     println!("new connection {connaddr_friendly}");
 
     match edge_server::find_edge_server() {
         Ok(edge_info) => {
-            procedure(conn, connaddr_friendly.clone(), &edge_info).await;
+            procedure(conn, connaddr_friendly.clone(), &edge_info, &ip_rule).await;
             edge_server::decrement_conn_count(edge_info.destination);
             println!("the connection with {}, closed", connaddr_friendly.clone());
         },

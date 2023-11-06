@@ -103,7 +103,7 @@ async fn create_http_server(address: String) -> Result<tokio::net::TcpListener, 
 pub async fn start() {
     let general_config = match std::fs::read_to_string(configdb::GENERAL_CONFIG_FILENAME) {
         Ok(content) => {
-            match serde_yaml::from_str::<configdb::ConfigGeneral>(content.as_str()) {
+            match serde_yaml::from_str::<configdb::General>(content.as_str()) {
                 Ok(object) => {
                     object
                 },
@@ -226,6 +226,7 @@ pub async fn start() {
         if let Some(conn_tuple) = conn_tuple {
             let conn = conn_tuple.0;
             let connaddr = conn_tuple.1;
+            let general_config = general_config.clone();
 
             match std::sync::Arc::clone(&conn_list).lock() {
                 Ok(mut locked_value) => {
@@ -235,7 +236,7 @@ pub async fn start() {
                     }
 
                     locked_value.0 = locked_value.0 + 1; // increment the number of connections
-                    locked_value.1.push(tokio::spawn(async move { client::handler(conn, connaddr).await }));
+                    locked_value.1.push(tokio::spawn(async move { client::handler(conn, connaddr, general_config).await }));
                 },
                 Err(err) => {
                     eprintln!("internal error, failed to lock the variable 'conn_list', error: {}; aborting!", err.to_string());
