@@ -2,6 +2,7 @@ pub mod configdb;
 pub mod server;
 pub mod client;
 pub mod edge_server;
+pub mod ip_rule;
 
 #[tokio::main]
 async fn main() {
