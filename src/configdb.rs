@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 pub const GENERAL_CONFIG_FILENAME: &str = "appdata/general.yaml";
 pub const EDGE_SERVER_DIRNAME: &str = "appdata/edges/";
 pub const IP_RULES_DIRNAME: &str = "appdata/ip-rules/";
+pub const LOCATION_RULES_DIRNAME: &str = "appdata/locations-rules/";
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub enum RuleGress {
@@ -17,6 +18,14 @@ pub enum GenericRuleGress {
     #[default]
     Allow,
     Deny,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
+pub struct LocationRule {
+    pub method: String,
+    pub location: String,
+    pub bypass: bool,
+    pub ingress: RuleGress,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]

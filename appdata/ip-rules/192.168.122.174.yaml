@@ -1,6 +1,6 @@
-    ip: 192.168.122.174
-    ingress: Allow
-    bypass_protection: false
-    limit_rate: 0
-    blacklisted_locations: []
-    whitelist_location: []
+ip: 192.168.122.174
+ingress: Allow
+bypass_protection: false
+limit_rate: 0
+blacklisted_locations: []
+whitelist_location: []

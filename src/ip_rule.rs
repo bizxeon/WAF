@@ -1,4 +1,3 @@
-
 use crate::configdb;
 
 pub fn get_ip_rule(ip: String) -> Option<configdb::IpRule> {

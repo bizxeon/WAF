@@ -1,7 +1,9 @@
 use crate::configdb;
 use crate::edge_server;
+use crate::location_rule;
 use crate::server;
 use crate::ip_rule;
+use crate::http1;
 
 async fn connect_to_https_edge_server<Address: AsRef<str> + tokio::net::ToSocketAddrs + std::fmt::Display>(address: Address, resolved_name: &str) -> Result<server::TcpClient, std::io::Error> {
     match openssl::ssl::SslConnector::builder(openssl::ssl::SslMethod::tls()) {
@@ -70,7 +72,7 @@ async fn connect_to_http_edge_server<Address: AsRef<str> + tokio::net::ToSocketA
     };
 }
 
-async fn procedure(mut conn: server::TcpClient, connaddr: String, edge_info: &configdb::Edge, ip_rule: &Option<configdb::IpRule>) {
+async fn procedure(mut conn: server::TcpClient, connaddr: String, edge_info: &configdb::Edge, ip_rule: &Option<configdb::IpRule>, general_config: &configdb::General) {
     let edgeaddr = format!("{}:{}", edge_info.destination, edge_info.destination_port);
 
     let mut edge_conn = match edge_info.https {
@@ -104,16 +106,109 @@ async fn procedure(mut conn: server::TcpClient, connaddr: String, edge_info: &co
 
     let mut conn_mtu_block = [0 as u8; 1500];
     let mut edge_mtu_block = [0 as u8; 1500];
+    let mut conn_request_storage: Vec<u8> = Vec::new();
+    let mut conn_request_body_size: usize = 0;
+    let mut conn_request_idx: usize = 0;
+    let mut conn_request_body_state = false;
+    let mut conn_request_bypass = false;
+    const CONN_REQUEST_STORAGE_HARD_LIMIT: usize = 128 * 1024;
 
     loop {
         tokio::select! {
             conn_read = conn.read(&mut conn_mtu_block) => {
                 match conn_read {
                     Ok(0) => {
-                        eprintln!("client {} closed the connection", &connaddr);
+                        println!("client {} closed the connection", &connaddr);
                         return;
                     },
                     Ok(len) => {
+                        if conn_request_body_state == false {
+                            if conn_request_storage.len() + len > CONN_REQUEST_STORAGE_HARD_LIMIT {
+                                println!("hard limit on request header reached, dropping connection with {}", &connaddr);
+                                return;
+                            } 
+
+                            conn_request_storage.append(&mut conn_mtu_block[..len].to_vec());
+
+                            let header_length = conn_request_storage.windows(4).position(|a| a == b"\r\n\r\n");
+
+                            if let Some(header_length) = header_length { 
+                                match http1::parse(conn_request_storage[..header_length].to_vec()) {                                    
+                                    Ok(object) => {
+                                        if let Some(content_length) = object.properties.get("Content-Length") {
+                                            match content_length.parse() {
+                                                Ok(content_length) => {
+                                                    conn_request_body_state = true;
+                                                    conn_request_body_size = content_length;
+
+                                                    if (header_length + 4) < len {
+                                                        conn_request_idx = len - (header_length + 4);
+                                                    }
+                                                },
+                                                Err(err) => {
+                                                    eprintln!("corrupted request from client {}, error: {}; dropping the connection", &connaddr, err.to_string());
+                                                    return;
+                                                }
+                                            }
+                                        }
+
+                                        if let Some(ip_rule) = ip_rule {
+                                            if ip_rule.blacklisted_locations.contains(&object.location) {
+                                                println!("dropping connection with {}, blocked by rule", &connaddr);
+                                                return;
+                                            }
+
+                                            if !ip_rule.whitelist_location.contains(&object.location) {
+                                                println!("dropping connection with {}, blocked by rule", &connaddr);
+                                                return;
+                                            }
+                                        }
+
+                                        if let Some(location_rule) = location_rule::get_location_rule(object.method, object.location) {
+                                            if location_rule.bypass == true { 
+                                                conn_request_bypass = true;
+                                            }
+
+                                            match location_rule.ingress {
+                                                configdb::RuleGress::GenericRule => {
+                                                    if matches!(general_config.ingress, configdb::GenericRuleGress::Deny) {
+                                                        println!("dropping connection with {}, blocked by rule", &connaddr);
+                                                        return;
+                                                    }
+                                                },
+                                                configdb::RuleGress::Deny => {
+                                                    println!("dropping connection with {}, blocked by rule", &connaddr);
+                                                    return;
+                                                },
+                                                _ => {}
+                                            }
+                                        }
+                                    },
+                                    Err(err) => {
+                                        eprintln!("processing the request from {} failed, error: {}", &connaddr, err.to_string());
+                                        return;
+                                    }
+                                }
+
+                                conn_request_storage.clear();
+                            }
+                        } else {
+                            conn_request_idx = conn_request_idx + len;
+
+                            if conn_request_bypass {
+                                // TODO
+                            } else {
+                                // TODO
+                            }
+
+                            if conn_request_idx >= conn_request_body_size {
+                                conn_request_body_state = false;
+                                conn_request_body_size = 0;
+                                conn_request_idx = 0;
+                                conn_request_bypass = false;
+                            }
+                        }
+
                         match edge_conn.write(&conn_mtu_block[..len]).await {
                             Ok(_) => { },
                             Err(err) => {
@@ -131,7 +226,7 @@ async fn procedure(mut conn: server::TcpClient, connaddr: String, edge_info: &co
             edge_read = edge_conn.read(&mut edge_mtu_block) => {
                 match edge_read {
                     Ok(0) => {
-                        eprintln!("edge {} closed the connection", &edgeaddr);
+                        println!("edge {} closed the connection", &edgeaddr);
                         return;
                     },
                     Ok(len) => {
@@ -175,13 +270,13 @@ pub async fn handler(conn: server::TcpClient, connaddr: std::net::SocketAddr, ge
     println!("new connection {connaddr_friendly}");
 
     match edge_server::find_edge_server() {
-        Ok(edge_info) => {
-            procedure(conn, connaddr_friendly.clone(), &edge_info, &ip_rule).await;
+        Some(edge_info) => {
+            procedure(conn, connaddr_friendly.clone(), &edge_info, &ip_rule, &general_config).await;
             edge_server::decrement_conn_count(edge_info.destination);
             println!("the connection with {}, closed", connaddr_friendly.clone());
         },
-        Err(err) => {
-            eprintln!("failed to find an edge server, error: {}, dropping the connection", err.to_string());
+        None => {
+            eprintln!("failed to find an edge server, dropping the connection");
         }
     }
 }

@@ -1,0 +1,4 @@
+method: GET
+location: /
+bypass: false
+ingress: Deny
