@@ -61,7 +61,6 @@ fn load_edge_servers() {
                                     Ok(content) => {
                                         match serde_yaml::from_str::<configdb::Edge>(&content) {
                                             Ok(object) => {
-                                                // edge_server_list.find((0, object));
                                                 let mut in_list = false;
                                                 for edge_server in edge_server_list.iter_mut() {
                                                     if edge_server.1.destination == object.destination && edge_server.1.destination_port == object.destination_port {
